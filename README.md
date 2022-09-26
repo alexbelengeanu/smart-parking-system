@@ -18,7 +18,3 @@ This repository contains the code for the backend and model training for my bach
 ## *Relevant repo's* 
 * x
 * y
-## TODO:
-- [x] x
-- [ ] y 
-- [ ] z
