@@ -1,4 +1,4 @@
-# Smart parking system (Work in progress)#
+# Smart parking system (Work in progress)
 This repository contains the code for the backend and model training for my bachelor thesis project.
 
 ## Pre-requisites 
