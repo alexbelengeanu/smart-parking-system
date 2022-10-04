@@ -1,0 +1,5 @@
+# Training arguments
+batch_size:
+epochs:
+lr:
+loss_function:
