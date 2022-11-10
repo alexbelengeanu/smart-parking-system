@@ -303,3 +303,5 @@ pip-selfcheck.json
 
 # App
 dataset
+outputs
+**/model_checkpoints/*

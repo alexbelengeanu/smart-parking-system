@@ -1,4 +1,4 @@
-from torchvision.models.segmentation.deeplabv3 import DeepLabHead
+'''from torchvision.models.segmentation.deeplabv3 import DeepLabHead
 from torchvision import models
 
 
@@ -12,12 +12,36 @@ def deeplab_v3(device,
     Returns:
         model: Returns the DeepLabV3 model with the ResNet101 backbone.
     """
-    model = models.segmentation.deeplabv3_resnet101(pretrained=True,
+    model = models.segmentation.deeplabv3_resnet101(weights=True,
                                                     progress=True)
     model.classifier = DeepLabHead(2048,
                                    outputchannels)
 
     # Set CUDA device
-    model.to_device(device)
+    model.to(device)
+
+    return model'''
+from typing import List
+
+import segmentation_models_pytorch as smp
+
+
+def deeplab_v3(encoder: str,
+               weights: str,
+               classes: List[str],
+               activation: str):
+    """
+    Initialize model for training.
+    Args:
+
+    Returns:
+        model: Returns the model.
+    """
+    model = smp.DeepLabV3(
+        encoder_name=encoder,
+        encoder_weights=weights,
+        classes=len(classes),
+        activation=activation,
+    )
 
     return model

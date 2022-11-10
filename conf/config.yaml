@@ -1,8 +1,8 @@
 # Training arguments
-batch_size:
-epochs:
-lr:
-momentum:
-weight_decay:
-loss_function:
-augmentation:
+batch_size: 4
+epochs: 1
+lr: 0.001
+momentum: 0.9
+weight_decay: 0.0005
+loss_function: "bce"
+augmentation: []

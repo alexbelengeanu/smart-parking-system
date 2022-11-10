@@ -33,6 +33,21 @@ class SegmentationDataset(Dataset):
         assert (len(self.samples) == len(self.labels))
 
     @staticmethod
+    def resize(source: Image.Image,
+               label: Image.Image
+                ) -> Tuple[Image.Image, Image.Image]:
+        """
+        Rescale the given image toa  fixed size.
+
+        :return:
+        """
+
+        source = source.resize((640, 320))
+        label = label.resize((640, 320))
+
+        return source, label
+
+    @staticmethod
     def to_tensor(source: Image.Image,
                   label: Image.Image) -> Tuple[Tensor, Tensor]:
         """
@@ -52,8 +67,12 @@ class SegmentationDataset(Dataset):
         :param index: An integer representing an index from the list of input data.
         :return: The source and the label at the index, taken through transforms.
         """
-        source = Image.open(os.path.join(self.samples_path, self.samples[index])).convert("L")
+        source = Image.open(os.path.join(self.samples_path, self.samples[index])).convert('RGB')
         label = Image.open(os.path.join(self.labels_path, self.labels[index]))
+
+        # Resize the images
+        source, label = self.resize(source=source,
+                                    label=label)
 
         if self.training:
             pass
