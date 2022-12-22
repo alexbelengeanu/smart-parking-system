@@ -1,12 +1,15 @@
 import hydra
 import torch
-
+import logging
 from omegaconf import DictConfig
-from system.detection.train import Train
+
+from system.detection.train import Trainer
+from system.backend.lib.logger import Logger
 
 
 def run_training(config: DictConfig) -> None:
-    train_experiment = Train(config=config)
+    logger = Logger(name='train', level=logging.DEBUG)
+    train_experiment = Trainer(config=config, logger=logger)
     train_experiment.run_experiment()
     del train_experiment
 

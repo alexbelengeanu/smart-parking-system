@@ -1,5 +1,4 @@
 import gc
-import logging
 import os
 from decimal import Decimal
 from typing import Optional, Union, List
@@ -21,8 +20,9 @@ from segmentation_models_pytorch.utils.train import TrainEpoch, ValidEpoch
 
 from system.detection.dataset import SegmentationDataset
 from system.detection.model import deeplab_v3
-from system.backend.utils.segmentation import preprocess_segmentation_map
+from system.backend.utils.segmentation import preprocess_segmentation_map, merge_images
 from system.backend.utils.metrics import compute_dice
+from system.backend.lib.logger import Logger
 
 
 def tear_down() -> None:
@@ -34,18 +34,22 @@ def tear_down() -> None:
     torch.cuda.empty_cache()
 
 
-class Train:
+class Trainer:
     def __init__(self,
-                 config: DictConfig) -> None:
+                 config: DictConfig,
+                 logger: Logger) -> None:
         """
-        Instantiate the train object.
+        Initialize the trainer object.
         :param config: The hydra config file
         """
         gc.collect()
         torch.cuda.empty_cache()
 
         self.config = config
+        self.logger = logger
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.logger.debug(f"Running training using device : {self.device}")
 
         self.train_dataset: Optional[SegmentationDataset] = None
         self.train_dataloader: Optional[DataLoader] = None
@@ -64,7 +68,7 @@ class Train:
         self.best_model: Optional[torch.nn.Module] = None
         self.best_valid_loss = float('inf')
         self.best_epoch = 0
-        self.version = 0
+        self.version = None
 
         self.train_results_path = None
         self.test_results_path = None
@@ -85,6 +89,7 @@ class Train:
         self.version = Decimal(file_in.read())
         file_in.close()
 
+        # Create training outputs directories
         experiment_folder_path = os.path.join(working_dir, r"system/detection/training", f"experiment_v{self.version}")
         if not os.path.isdir(experiment_folder_path):
             os.mkdir(experiment_folder_path)
@@ -101,11 +106,16 @@ class Train:
         if not os.path.isdir(self.model_checkpoints_path):
             os.mkdir(self.model_checkpoints_path)
 
-        # Update experiment version for the next use
+        # Update experiment version for the next experiment
         file_out = open(version_path, "w")
-        _version = self.version + Decimal("0.01")
+        if str(self.version).split(".")[1] == "99":
+            _version = str(float(str(self.version).split(".")[0]) + 1) + "0"
+        else:
+            _version = self.version + Decimal("0.01")
         file_out.write(str(_version))
         file_out.close()
+
+        self.logger.debug("Succesfully created output directories for the training experiment.")
 
     def make_datasets(self) -> None:
         """
@@ -124,6 +134,9 @@ class Train:
                                                  device=self.device,
                                                  transforms=transforms,
                                                  training=True)
+        self.logger.debug(
+            f"Loaded train dataset with {len(self.train_dataset)} samples.")
+
         self.train_dataloader = DataLoader(self.train_dataset,
                                            batch_size=batch_size,
                                            shuffle=True,
@@ -136,6 +149,9 @@ class Train:
         self.validation_dataset = SegmentationDataset(samples_folder=validation_images_path,
                                                       labels_folder=validation_labels_path,
                                                       device=self.device)
+        self.logger.debug(
+            f"Loaded validation dataset with {len(self.validation_dataset)} samples.")
+
         self.validation_dataloader = DataLoader(self.validation_dataset,
                                                 batch_size=batch_size,
                                                 shuffle=False,
@@ -148,8 +164,12 @@ class Train:
         self.test_dataset = SegmentationDataset(samples_folder=test_images_path,
                                                 labels_folder=test_labels_path,
                                                 device=self.device)
+        self.logger.debug(
+            f"Loaded test dataset with {len(self.test_dataset)} samples.")
+
         self.test_dataloader = DataLoader(self.test_dataset,
                                           batch_size=batch_size,
+                                          shuffle=False,
                                           num_workers=0)
 
     def make_model(self) -> None:
@@ -157,7 +177,7 @@ class Train:
         Instantiate and store the model for the experiment.
         :return: None.
         """
-        #self.model = deeplab_v3(self.device)
+
         self.model = deeplab_v3('resnet101', 'imagenet', ['license-plate'], 'sigmoid')
 
     def set_optimizer(self) -> None:
@@ -179,7 +199,7 @@ class Train:
         if loss_function == "bce":
             self.criterion = torch.nn.BCELoss()
         else:
-            print(f"Invalid loss function: {loss_function}. Terminating.")
+            self.logger.debug(f"Invalid loss function: {loss_function}.")
 
     def setup(self) -> None:
         """
@@ -195,99 +215,16 @@ class Train:
         self.n_epochs = self.config['epochs']
 
     def train(self) -> None:
-        """
-        Train the model using the available train and validation data.
-        Results and metrics are logged to Core Control.
-        :return: None.
-        """
-        for epoch in range(self.n_epochs):
-            print(f"Epoch {epoch} - Training")
-            self.model.train()
-            train_loss = 0.0
-            train_dice = 0.0
-            for index, (inputs, labels) in enumerate(self.train_dataloader):
-                predicted = self.model(inputs.to(self.device))
-                train_batch_loss = self.criterion(predicted, labels.to(self.device))
-
-                self.optimizer.zero_grad()
-                train_batch_loss.backward()
-                self.optimizer.step()
-
-                # Transform the predicted image into a PIL image with range 0-255
-                predicted_image = to_pil_image(torch.squeeze(predicted).cpu(), "L")
-                threshold_predicted = preprocess_segmentation_map(predicted_image)
-                labels_image = to_pil_image(torch.squeeze(labels.cpu()), "L")
-
-                train_batch_dice = compute_dice(np.array(labels_image),
-                                                np.array(threshold_predicted))
-
-                train_loss += train_batch_loss.item()
-                train_dice += train_batch_dice.item()
-
-                # threshold_predicted - Grayscale 0-255
-                threshold_predicted_image = Image.fromarray(threshold_predicted)
-
-                # labels_image - Grayscale 0-255
-                labels_image = to_pil_image(torch.squeeze(labels.cpu()), "L")
-
-                # input_image - Grayscale 0-255
-                input_image = to_pil_image(torch.squeeze(inputs.cpu()), "L")
-
-                input_image.save(os.path.join(self.train_results_path, f'{index}_source.png'))
-                labels_image.save(os.path.join(self.train_results_path, f'{index}_label.png'))
-                threshold_predicted_image.save(os.path.join(self.train_results_path, f'{index}_predict.png'))
-
-            epoch_train_loss = train_loss / len(self.train_dataloader)
-            epoch_train_dice = train_dice / len(self.train_dataloader)
-            print(f"Epoch {epoch}: Train Loss {epoch_train_loss:.2f} | Train Dice {epoch_train_dice:.2f}")
-
-            valid_loss = 0.0
-            valid_dice = 0.0
-            with torch.no_grad():  # reduced memory use over model.eval()
-                print(f"Epoch {epoch} - Validating")
-                for index, (image, labels) in enumerate(self.valid_dataloader):
-                    predicted = self.model(image.to(self.device))
-                    val_batch_loss = self.criterion(predicted, labels.to(self.device))
-
-                    # Todo - this will not work for batch_size > 1
-                    predicted_image = to_pil_image(torch.squeeze(predicted).cpu(), "L")
-                    threshold_predicted = preprocess_segmentation_map(predicted_image)
-                    labels_image = to_pil_image(torch.squeeze(labels.cpu()), "L")
-
-                    val_batch_dice = compute_dice(np.array(labels_image),
-                                                  np.array(threshold_predicted))
-
-                    valid_loss += val_batch_loss.item()
-                    valid_dice += val_batch_dice.item()
-
-                epoch_valid_loss = valid_loss / len(self.valid_dataloader)
-                epoch_valid_dice = valid_dice / len(self.valid_dataloader)
-                print(f"Epoch {epoch}: Valid Loss {epoch_valid_loss:.2f} | Valid Dice {epoch_valid_dice:.2f}")
-
-                if epoch_valid_loss < self.best_valid_loss:
-                    print(f"Found model with better valid loss than previous: {epoch_valid_loss:.3f} < "
-                          f"{self.best_valid_loss:.3f}")
-                    self.best_valid_loss = epoch_valid_loss
-                    self.best_epoch = epoch
-                    self.best_model = self.model
-
-                    # Save the model weights and results
-                    torch.save(self.model.state_dict(),
-                               os.path.join(self.model_checkpoints_path,
-                                            f'v{self.version}_e{self.best_epoch}_l{self.best_valid_loss:.3f}.pt'))
-
-    def training(self) -> None:
+        # Initialize SMP Train Epoch object
         train_epoch = TrainEpoch(
             self.model,
             loss=DiceLoss(),
             metrics=[IoU()],
-            optimizer=optim.SGD(self.model.parameters(),
-                                   lr=self.config['lr'],
-                                   momentum=self.config["momentum"],
-                                   weight_decay=self.config["weight_decay"]),
+            optimizer=self.optimizer,
             device=self.device,
             verbose=True)
 
+        # Initialize SMP Validation Epoch object
         valid_epoch = ValidEpoch(
             self.model,
             loss=DiceLoss(),
@@ -298,15 +235,32 @@ class Train:
         train_logs_list, valid_logs_list = [], []
 
         for epoch in range(self.n_epochs):
-            print(f"Epoch {epoch} - Training")
+            self.logger.debug(f"Epoch {epoch} | Training")
             train_logs = train_epoch.run(self.train_dataloader)
             valid_logs = valid_epoch.run(self.validation_dataloader)
             train_logs_list.append(train_logs)
             valid_logs_list.append(valid_logs)
 
-            if valid_logs["dice_loss"] < self.best_valid_loss:
-                print(f"Found model with better valid loss than previous: {valid_logs['dice_loss']:.3f} < "
-                      f"{self.best_valid_loss:.3f}")
+            if valid_logs["dice_loss"] > 0.1:
+                self.logger.debug(
+                    f"Found model with better validation loss than previous: {valid_logs['dice_loss']:.3f} < "
+                    f"{self.best_valid_loss:.3f}, but bigger loss than 0.1.")
+                if valid_logs["dice_loss"] < self.best_valid_loss - 0.2:
+                    self.logger.debug(
+                        f"There is a big difference between the previous model and the current one (> .2). Saving "
+                        f"current model weigths.")
+                    self.best_valid_loss = valid_logs["dice_loss"]
+                    self.best_epoch = epoch
+                    self.best_model = self.model
+
+                    # Save the model weights and results
+                    torch.save(self.model.state_dict(),
+                               os.path.join(self.model_checkpoints_path,
+                                            f'v{self.version}_e{self.best_epoch}_l{self.best_valid_loss:.3f}.pt'))
+            else:
+                self.logger.debug(
+                    f"Found model with better validation loss than previous: {valid_logs['dice_loss']:.3f} < "
+                    f"{self.best_valid_loss:.3f}, and smaller loss than 0.1. Saving current model weights.")
                 self.best_valid_loss = valid_logs["dice_loss"]
                 self.best_epoch = epoch
                 self.best_model = self.model
@@ -316,51 +270,8 @@ class Train:
                            os.path.join(self.model_checkpoints_path,
                                         f'v{self.version}_e{self.best_epoch}_l{self.best_valid_loss:.3f}.pt'))
 
-    def test(self):
-        """
-        Evaluate the model against a holdout dataset.
-        The results are logged to Core Control.
-        :return: None.
-        """
-        test_loss = 0.0
-        test_dice = 0.0
-
-        with torch.no_grad():
-            for index, (input_image, labels) in enumerate(self.test_dataloader):
-                # Compute the prediction and the loss on the torch tensor prediction
-                predictions = self.best_model(input_image.to(self.device))
-                test_batch_loss = self.criterion(predictions, labels.to(self.device))
-
-                # Important: For torch tensors, to_pil_image converts to 0-255 uint range by default.
-                predicted_image = to_pil_image(torch.squeeze(predictions).cpu(), "L")
-
-                # threshold_predicted - Grayscale 0-255
-                threshold_predicted = Image.fromarray(
-                    preprocess_segmentation_map(predicted_image))
-
-                # labels_image - Grayscale 0-255
-                labels_image = to_pil_image(torch.squeeze(labels.cpu()), "L")
-
-                test_batch_dice = compute_dice(np.array(labels_image),
-                                               np.array(threshold_predicted))
-
-                # input_image - Grayscale 0-255
-                input_image = to_pil_image(torch.squeeze(input_image.cpu()), "L")
-
-                # Store the 3 images as output
-                input_image.save(os.path.join(self.test_results_path, f'{index}_img.png'))
-                labels_image.save(os.path.join(self.test_results_path, f'{index}_label.png'))
-                threshold_predicted.save(os.path.join(self.test_results_path, f'{index}_pred.png'))
-
-                test_loss += test_batch_loss.item()
-                test_dice += test_batch_dice.item()
-
-            test_loss = test_loss / len(self.test_dataloader)
-            test_dice = test_dice / len(self.test_dataloader)
-
-        print(f"Test Loss {test_loss:.2f} | Test Dice {test_dice:.2f}")
-
-    def testing(self) -> None:
+    def test(self) -> None:
+        self.logger.debug(f"Running model on test dataset.")
         test_epoch = ValidEpoch(
             self.model,
             loss=DiceLoss(),
@@ -369,11 +280,36 @@ class Train:
             verbose=True,
         )
 
+        # Run model on test dataset
         test_logs = test_epoch.run(self.test_dataloader)
-        print("Evaluation on Test Data: ")
-        print(f"Mean IoU Score: {test_logs['iou_score']:.4f}")
-        print(f"Mean Dice Loss: {test_logs['dice_loss']:.4f}")
-        print(f'test_logs data : {test_logs}')
+        self.logger.debug("Evaluation on Test Data: ")
+        self.logger.debug(f"Mean IoU Score: {test_logs['iou_score']:.4f}")
+        self.logger.debug(f"Mean Dice Loss: {test_logs['dice_loss']:.4f}")
+        self.logger.debug(f'test_logs data : {test_logs}')
+
+        # Save model output on test dataset
+        for batch_idx, (images, labels) in enumerate(self.test_dataloader):
+            # Make predict on input image
+            for sample_idx, image in enumerate(images):
+                prediction = self.best_model(image.unsqueeze(0).to(self.device))
+
+                # Convert predict to PIL.Image
+                predicted_image = to_pil_image(torch.squeeze(prediction).cpu())
+                threshold_predicted_image = Image.fromarray(
+                    preprocess_segmentation_map(predicted_image))
+
+                # Convert label to PIL.Image
+                labels_image = to_pil_image(torch.squeeze(labels[sample_idx]).cpu())
+
+                # Convert label to PIL.Image
+                input_image = to_pil_image(torch.squeeze(image).cpu())
+
+                # Merge input image, ground truth and predict
+                result_images_list = [labels_image, input_image, threshold_predicted_image]
+                merged_result = merge_images(result_images_list)
+
+                merged_result.save(os.path.join(self.test_results_path,
+                                                f"Batch #{batch_idx}_Sample #{sample_idx}.png"))
 
     def generate_report(self) -> None:
         """
@@ -388,8 +324,8 @@ class Train:
         :return: None.
         """
         self.setup()
-        self.training()
-        self.testing()
+        self.train()
+        self.test()
         self.generate_report()
         tear_down()
 
