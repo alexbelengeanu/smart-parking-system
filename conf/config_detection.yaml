@@ -1,7 +1,7 @@
 # Training arguments
 batch_size: 4
-epochs: 35
-lr: 0.01
+epochs: 100
+lr: 0.005
 momentum: 0.9
 weight_decay: 0.0005
 loss_function: "bce"

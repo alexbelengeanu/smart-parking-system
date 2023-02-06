@@ -1,15 +1,13 @@
 import gc
 import os
-from decimal import Decimal
-from typing import Optional, Union, List
+from typing import Optional
 
-import numpy as np
-import pandas as pd
+import mlflow
 import torch
 from PIL import Image
 from decimal import Decimal
 from hydra.utils import get_original_cwd
-from omegaconf import DictConfig, open_dict
+from omegaconf import DictConfig
 from torch import optim
 from torch.utils.data.dataloader import DataLoader
 from torchvision.transforms.functional import to_pil_image
@@ -18,11 +16,10 @@ from segmentation_models_pytorch.utils.losses import DiceLoss
 from segmentation_models_pytorch.utils.metrics import IoU
 from segmentation_models_pytorch.utils.train import TrainEpoch, ValidEpoch
 
-from system.detection.dataset import SegmentationDataset
-from system.detection.model import deeplab_v3
-from system.backend.utils.segmentation import preprocess_segmentation_map, merge_images
-from system.backend.utils.metrics import compute_dice
-from system.backend.lib.logger import Logger
+from system import SegmentationDataset
+from system import deeplab_v3
+from system import preprocess_segmentation_map, merge_images
+from system import Logger
 
 
 def tear_down() -> None:
@@ -37,7 +34,8 @@ def tear_down() -> None:
 class Trainer:
     def __init__(self,
                  config: DictConfig,
-                 logger: Logger) -> None:
+                 logger: Logger,
+                 experiment: mlflow.entities.Experiment) -> None:
         """
         Initialize the trainer object.
         :param config: The hydra config file
@@ -47,6 +45,7 @@ class Trainer:
 
         self.config = config
         self.logger = logger
+        self.experiment = experiment
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.logger.debug(f"Running training using device : {self.device}")
@@ -70,9 +69,8 @@ class Trainer:
         self.best_epoch = 0
         self.version = None
 
-        self.train_results_path = None
-        self.test_results_path = None
         self.model_checkpoints_path = None
+        self.run_id = None
 
     def make_dirs(self) -> None:
         """
@@ -89,18 +87,10 @@ class Trainer:
         self.version = Decimal(file_in.read())
         file_in.close()
 
-        # Create training outputs directories
+        # Create model checkpoints directory
         experiment_folder_path = os.path.join(working_dir, r"system/detection/training", f"experiment_v{self.version}")
         if not os.path.isdir(experiment_folder_path):
             os.mkdir(experiment_folder_path)
-
-        self.train_results_path = os.path.join(experiment_folder_path, "train_results")
-        if not os.path.isdir(self.train_results_path):
-            os.mkdir(self.train_results_path)
-
-        self.test_results_path = os.path.join(experiment_folder_path, "test_results")
-        if not os.path.isdir(self.test_results_path):
-            os.mkdir(self.test_results_path)
 
         self.model_checkpoints_path = os.path.join(experiment_folder_path, "model_checkpoints")
         if not os.path.isdir(self.model_checkpoints_path):
@@ -115,7 +105,7 @@ class Trainer:
         file_out.write(str(_version))
         file_out.close()
 
-        self.logger.debug("Succesfully created output directories for the training experiment.")
+        self.logger.debug("Succesfully created checkpoint directory for the experiment.")
 
     def make_datasets(self) -> None:
         """
@@ -232,23 +222,27 @@ class Trainer:
             device=self.device,
             verbose=True)
 
-        train_logs_list, valid_logs_list = [], []
-
         for epoch in range(self.n_epochs):
             self.logger.debug(f"Epoch {epoch} | Training")
             train_logs = train_epoch.run(self.train_dataloader)
             valid_logs = valid_epoch.run(self.validation_dataloader)
-            train_logs_list.append(train_logs)
-            valid_logs_list.append(valid_logs)
 
-            if valid_logs["dice_loss"] > 0.1:
+            # Log IoU Score in MLflow
+            mlflow.log_metric("Train IoU", train_logs['iou_score'])
+            mlflow.log_metric("Validation IoU", valid_logs['iou_score'])
+
+            # Log Dice Loss Score in MLflow
+            mlflow.log_metric("Train Loss", train_logs['dice_loss'])
+            mlflow.log_metric("Validation Loss", valid_logs['dice_loss'])
+
+            if valid_logs["dice_loss"] > 0.4:
                 self.logger.debug(
                     f"Found model with better validation loss than previous: {valid_logs['dice_loss']:.3f} < "
-                    f"{self.best_valid_loss:.3f}, but bigger loss than 0.1.")
+                    f"{self.best_valid_loss:.3f}, but bigger loss than 0.4.")
                 if valid_logs["dice_loss"] < self.best_valid_loss - 0.2:
                     self.logger.debug(
-                        f"There is a big difference between the previous model and the current one (> .2). Saving "
-                        f"current model weigths.")
+                        f"There is a major difference between the previous model loss and the current loss (> .2). "
+                        f"Saving current model weights.")
                     self.best_valid_loss = valid_logs["dice_loss"]
                     self.best_epoch = epoch
                     self.best_model = self.model
@@ -258,17 +252,18 @@ class Trainer:
                                os.path.join(self.model_checkpoints_path,
                                             f'v{self.version}_e{self.best_epoch}_l{self.best_valid_loss:.3f}.pt'))
             else:
-                self.logger.debug(
-                    f"Found model with better validation loss than previous: {valid_logs['dice_loss']:.3f} < "
-                    f"{self.best_valid_loss:.3f}, and smaller loss than 0.1. Saving current model weights.")
-                self.best_valid_loss = valid_logs["dice_loss"]
-                self.best_epoch = epoch
-                self.best_model = self.model
+                if valid_logs["dice_loss"] < self.best_valid_loss:
+                    self.logger.debug(
+                        f"Found model with better validation loss than previous: {valid_logs['dice_loss']:.3f} < "
+                        f"{self.best_valid_loss:.3f}, and smaller loss than 0.4. Saving current model weights anyway.")
+                    self.best_valid_loss = valid_logs["dice_loss"]
+                    self.best_epoch = epoch
+                    self.best_model = self.model
 
-                # Save the model weights and results
-                torch.save(self.model.state_dict(),
-                           os.path.join(self.model_checkpoints_path,
-                                        f'v{self.version}_e{self.best_epoch}_l{self.best_valid_loss:.3f}.pt'))
+                    # Save the model weights and results
+                    torch.save(self.model.state_dict(),
+                               os.path.join(self.model_checkpoints_path,
+                                            f'v{self.version}_e{self.best_epoch}_l{self.best_valid_loss:.3f}.pt'))
 
     def test(self) -> None:
         self.logger.debug(f"Running model on test dataset.")
@@ -283,9 +278,12 @@ class Trainer:
         # Run model on test dataset
         test_logs = test_epoch.run(self.test_dataloader)
         self.logger.debug("Evaluation on Test Data: ")
-        self.logger.debug(f"Mean IoU Score: {test_logs['iou_score']:.4f}")
-        self.logger.debug(f"Mean Dice Loss: {test_logs['dice_loss']:.4f}")
-        self.logger.debug(f'test_logs data : {test_logs}')
+        self.logger.debug(f"IoU Score: {test_logs['iou_score']:.4f}")
+        self.logger.debug(f"Dice Loss: {test_logs['dice_loss']:.4f}")
+
+        # Log Metrics on Test Dataset
+        mlflow.log_metric("Test IoU", test_logs['iou_score'])
+        mlflow.log_metric("Test Loss", test_logs['dice_loss'])
 
         # Save model output on test dataset
         for batch_idx, (images, labels) in enumerate(self.test_dataloader):
@@ -308,8 +306,9 @@ class Trainer:
                 result_images_list = [labels_image, input_image, threshold_predicted_image]
                 merged_result = merge_images(result_images_list)
 
-                merged_result.save(os.path.join(self.test_results_path,
-                                                f"Batch #{batch_idx}_Sample #{sample_idx}.png"))
+                mlflow.log_image(merged_result,
+                                 f"./test_results/batch{batch_idx}-sample{sample_idx}.png")
+
 
     def generate_report(self) -> None:
         """
@@ -324,8 +323,19 @@ class Trainer:
         :return: None.
         """
         self.setup()
-        self.train()
-        self.test()
+        # Start MLflow
+        RUN_NAME = f"experiment_v{self.version}"
+        with mlflow.start_run(experiment_id=self.experiment.experiment_id, run_name=RUN_NAME) as run:
+            # Retrieve run id
+            self.run_id = run.info.run_id
+            mlflow.set_tracking_uri("http://127.0.0.1:5000")
+            self.logger.debug(f'Started running {RUN_NAME} with ID: {self.run_id}')
+            self.logger.debug(f'Artifact URI : {mlflow.get_artifact_uri()}')
+            mlflow.log_params(self.config)
+
+            self.train()
+            self.test()
+
         self.generate_report()
         tear_down()
 
