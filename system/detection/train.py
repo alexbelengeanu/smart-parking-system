@@ -16,10 +16,10 @@ from segmentation_models_pytorch.utils.losses import DiceLoss
 from segmentation_models_pytorch.utils.metrics import IoU
 from segmentation_models_pytorch.utils.train import TrainEpoch, ValidEpoch
 
-from system import SegmentationDataset
-from system import deeplab_v3
-from system import preprocess_segmentation_map, merge_images
-from system import Logger
+from system.detection.dataset import SegmentationDataset
+from system.detection.model import deeplab_v3
+from system.backend.utils.segmentation import preprocess_segmentation_map, merge_images
+from system.backend.lib.logger import Logger
 
 
 def tear_down() -> None:

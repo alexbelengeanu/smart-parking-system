@@ -35,9 +35,9 @@ class SegmentationDataset(Dataset):
     @staticmethod
     def resize(source: Image.Image,
                label: Image.Image
-                ) -> Tuple[Image.Image, Image.Image]:
+               ) -> Tuple[Image.Image, Image.Image]:
         """
-        Rescale the given image toa  fixed size.
+        Rescale the given image to a fixed size.
 
         :return:
         """
