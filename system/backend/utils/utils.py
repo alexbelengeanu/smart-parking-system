@@ -1,9 +1,10 @@
 import os
 import cv2
 import numpy as np
+from PIL import Image
 
 from system.backend.lib.types import ProcessEnum
-from system.backend.lib.consts import RUN_ID_PATH, RESULTS_PATH
+from system.backend.lib.consts import RUN_ID_PATH, RESULTS_PATH, RAW_MAX_SIZE
 
 
 def histogram_equalization(image: np.ndarray):
@@ -127,3 +128,17 @@ def draw_bboxes(bboxes: list,
         image = cv2.rectangle(image, bbox[0], bbox[1], (255, 0, 0), 1)
 
     return image
+
+
+def add_padding(character: Image.Image) -> Image.Image:
+    width, height = character.size
+    x_axis_offset = (RAW_MAX_SIZE[0] - width) / 2
+    y_axis_offset = (RAW_MAX_SIZE[1] - height) / 2
+
+    new_width = width + int((2 * x_axis_offset))
+    new_height = height + int((2 * y_axis_offset))
+
+    padded_character = Image.new(character.mode, (new_width, new_height), 255)
+    padded_character.paste(character, (int(x_axis_offset), int(y_axis_offset)))
+
+    return padded_character
