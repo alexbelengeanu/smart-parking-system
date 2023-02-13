@@ -50,3 +50,10 @@ AZURE_CONFIG = {
     'host': 'smart-parking-system.mysql.database.azure.com',
     'database': "thesis"
 }
+
+ARDUINO_PORT = "COM3"
+ARDUINO_BAUDRATE = 9600
+
+# MESSAGES
+ACCESS_ALLOWED_MESSAGE = "Access allowed."
+ACCESS_DENIED_MESSAGE = "Access denied."

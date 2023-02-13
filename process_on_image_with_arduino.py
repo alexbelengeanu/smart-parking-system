@@ -1,3 +1,30 @@
+'''import serial
+
+port = "COM3"
+baudrate = 9600
+ser = serial.Serial(port, baudrate)
+
+
+def tell(msg):
+    msg = "[python-sent] " + msg + '\n'
+    x = msg.encode() # encode n send
+    ser.write(x)
+
+
+def hear():
+    serialstring = ser.read_until()
+    serialstring = serialstring.decode()
+    return "[python-received] " + serialstring
+
+
+while True:
+    var = hear()  # listen to arduino
+    print(var)
+    if var.find("[arduino-sent] Object detected!") != -1:
+        val = input()  # take user input
+        tell(val)  # send it to arduino'''
+
+
 from typing import List, Tuple
 import os
 import torch
@@ -15,10 +42,11 @@ from system.backend.utils.segmentation import get_segmentation_mask, get_contour
     filter_bboxes_noise
 from system.backend.utils.models import initialize_model
 from system.backend.lib.cloud import get_connector, check_plate_number
+from system.backend.lib.serial_communication import initialize_serial_communication, tell, hear
 from system.backend.lib.logger import Logger
 from system.backend.lib.types import ParkingSystemModelEnum, ProcessEnum
 from system.backend.lib.consts import SEGMENTATION_MODEL_PATH, CLASSIFICATION_MODEL_PATH, PROCESS_ON_IMAGES_PATH, \
-    CHARACTERS_MAPPING
+    CHARACTERS_MAPPING, ACCESS_ALLOWED_MESSAGE, ACCESS_DENIED_MESSAGE
 
 
 def license_plate_detection(input_sample: Image.Image,
@@ -171,6 +199,9 @@ def main():
 
     logger.info("Starting process on single image input.")
 
+    serial_communication = initialize_serial_communication()
+    logger.debug("Initialized serial communication.")
+
     model_segmentation = initialize_model(ParkingSystemModelEnum.SEGMENTATION, SEGMENTATION_MODEL_PATH)
     model_classification = initialize_model(ParkingSystemModelEnum.CLASSIFICATION, CLASSIFICATION_MODEL_PATH)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -179,40 +210,55 @@ def main():
     connector = get_connector(logger=logger)
     logger.debug("Initialized connection to Azure Database.")
 
-    # Read input sample and resize to (640, 320) - the model's input size.
-    input_sample = Image.open(os.path.join(PROCESS_ON_IMAGES_PATH, args.filename)).convert('RGB').resize((640, 320))
-    logger.log_image(image=input_sample,
-                     image_name="original_image")
+    while True:
+        message_from_arduino = hear(serial_communication=serial_communication)  # listen to arduino
+        print(message_from_arduino)
+        if message_from_arduino.find("[arduino-sent] Object detected!") != -1:
+            # Read input sample.
+            input_sample = Image.open(
+                os.path.join(PROCESS_ON_IMAGES_PATH, args.filename)).convert('RGB')
+            logger.log_image(image=input_sample,
+                             image_name="original_image")
 
-    cropped_license_plate = license_plate_detection(input_sample=input_sample,
-                                                    model=model_segmentation,
-                                                    device=device,
-                                                    logger=logger)
+            input_sample = input_sample.resize((640, 320))  # Resize to the model's input size.
+            logger.log_image(image=input_sample,
+                             image_name="resized_image")
 
-    filtered_character_bboxes, cropped_plate_without_noise = character_segmentation(
-        cropped_license_plate=cropped_license_plate,
-        logger=logger)
+            cropped_license_plate = license_plate_detection(input_sample=input_sample,
+                                                            model=model_segmentation,
+                                                            device=device,
+                                                            logger=logger)
 
-    character_classification_results = character_classification(model=model_classification,
-                                                                filtered_character_bboxes=filtered_character_bboxes,
-                                                                cropped_plate_without_noise=cropped_plate_without_noise,
-                                                                logger=logger)
-    logger.debug(f"Predicted {len(character_classification_results)} characters.")
+            filtered_character_bboxes, cropped_plate_without_noise = character_segmentation(
+                cropped_license_plate=cropped_license_plate,
+                logger=logger)
 
-    license_plate_as_string = license_plate_reconstruction_as_string(
-        character_classification_results=character_classification_results)
+            character_classification_results = character_classification(model=model_classification,
+                                                                        filtered_character_bboxes=filtered_character_bboxes,
+                                                                        cropped_plate_without_noise=cropped_plate_without_noise,
+                                                                        logger=logger)
+            logger.debug(f"Predicted {len(character_classification_results)} characters.")
 
-    was_found = check_plate_number(plate_number=license_plate_as_string,
-                                   connector=connector)
+            license_plate_as_string = license_plate_reconstruction_as_string(
+                character_classification_results=character_classification_results)
 
-    with open(os.path.join(results_folder_path, "output.txt"), 'w') as f:
-        if was_found:
-            f.write(f'License plate {license_plate_as_string} was found in the database with allowed vehicles.')
-        else:
-            f.write(f'License plate {license_plate_as_string} was not found in the database with allowed vehicles.')
+            was_found = check_plate_number(plate_number=license_plate_as_string,
+                                           connector=connector)
 
-    logger.info("Finished process on single image input.")
+            with open(os.path.join(results_folder_path, "output.txt"), 'w') as f:
+                if was_found:
+                    f.write(f'License plate {license_plate_as_string} was found in the database with allowed vehicles.')
+                    tell(serial_communication=serial_communication,
+                         message=ACCESS_ALLOWED_MESSAGE)
+                else:
+                    f.write(f'License plate {license_plate_as_string} '
+                            f'was not found in the database with allowed vehicles.')
+                    tell(serial_communication=serial_communication,
+                         message=ACCESS_DENIED_MESSAGE)
+
+            logger.info("Finished process on single image input.")
 
 
 if __name__ == "__main__":
     main()
+

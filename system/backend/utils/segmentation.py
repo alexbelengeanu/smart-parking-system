@@ -7,7 +7,7 @@ import torch
 from torchvision import transforms
 
 from system.detection.model import deeplab_v3
-from system.backend.utils.utils import image_resize, unsharp_mask
+from system.backend.utils.utils import image_resize, unsharp_mask, get_first_quartile_of_areas_from_bboxes
 from system.backend.lib.types import ThresholdEnum
 from system.backend.lib.logger import Logger
 
@@ -47,8 +47,8 @@ def get_segmentation_mask(input_sample: Image.Image,
 
 
 def get_contours(image: np.ndarray,
-                 pixel_threshold: int = 127,
-                 threshold_type: ThresholdEnum = ThresholdEnum.TOZERO,
+                 pixel_threshold: int = 75,
+                 threshold_type: ThresholdEnum = ThresholdEnum.BINARY,
                  log_images: bool = False,
                  logger: Logger = None) -> List:
 
@@ -90,19 +90,31 @@ def filter_bboxes_noise(bboxes: list,
                         contours: list,
                         image: np.ndarray):
     filtered_bboxes = []
+
     for idx in bboxes:
         x, y = contours[idx].T
         bbox = ((np.min(x), np.min(y)), (np.max(x), np.max(y)))
         character = image[
                     max(bbox[0][1], 0): min(bbox[1][1], image.shape[0]),
                     max(bbox[0][0], 0): min(bbox[1][0], image.shape[1])]
+        bbox_area = (max(bbox[0][1], 0) + min(bbox[1][1], image.shape[0])) * \
+                    (max(bbox[0][0], 0) + min(bbox[1][0], image.shape[1]))
 
         _, threshold_character = cv2.threshold(character, 175, 255, cv2.THRESH_BINARY)
         values, counts = np.unique(threshold_character, return_counts=True)
         if counts[0] > 2000 and counts[1] > (counts[0] / 2) and len(counts) > 1:
             filtered_bboxes.append(bbox)
 
+    """area_threshold = get_first_quartile_of_areas_from_bboxes(filtered_bboxes, image)
+
+    for bbox in filtered_bboxes:
+        bbox_area = (max(bbox[0][1], 0) + min(bbox[1][1], image.shape[0])) * \
+                    (max(bbox[0][0], 0) + min(bbox[1][0], image.shape[1]))
+        if bbox_area < area_threshold:
+            filtered_bboxes.remove(bbox)"""
+
     return filtered_bboxes
+
 
 def merge_images(images: List) -> Image:
     """

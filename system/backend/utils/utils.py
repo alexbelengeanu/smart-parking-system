@@ -1,4 +1,6 @@
 import os
+from typing import List
+
 import cv2
 import numpy as np
 from PIL import Image
@@ -52,7 +54,8 @@ def image_resize(image, width=None, height=None, inter=cv2.INTER_CUBIC):
     return resized
 
 
-def extract_segmentation_results(image, mask, resize_width=None, resize_height=256, sharpen_amount=10, crop_min_area_rect=False):
+def extract_segmentation_results(image, mask, resize_width=None, resize_height=256, sharpen_amount=10,
+                                 crop_min_area_rect=False):
     image = cv2.cvtColor(np.array(image, copy=True), cv2.COLOR_RGB2BGR)
     contours, hierarchy = cv2.findContours(
         mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -79,19 +82,19 @@ def extract_segmentation_results(image, mask, resize_width=None, resize_height=2
             if angle < -45:
                 angle += 90
 
-            center = ((x1+x2)/2, (y1+y2)/2)
-            size = (x2-x1, y2-y1)
-            M = cv2.getRotationMatrix2D((size[0]/2, size[1]/2), angle, 1.0)
+            center = ((x1 + x2) / 2, (y1 + y2) / 2)
+            size = (x2 - x1, y2 - y1)
+            M = cv2.getRotationMatrix2D((size[0] / 2, size[1] / 2), angle, 1.0)
             cropped = cv2.getRectSubPix(image, size, center)
             cropped = cv2.warpAffine(cropped, M, size)
             croppedW = H if H > W else W
             croppedH = H if H < W else W
-            
+
             result = cv2.getRectSubPix(
-                cropped, (int(croppedW), int(croppedH)), (size[0]/2, size[1]/2))
+                cropped, (int(croppedW), int(croppedH)), (size[0] / 2, size[1] / 2))
         else:
-            x,y,w,h = cv2.boundingRect(c)
-            result = image[y:y+h, x:x+w]
+            x, y, w, h = cv2.boundingRect(c)
+            result = image[y:y + h, x:x + w]
 
         result = image_resize(
             result, height=resize_height, width=resize_width)
@@ -108,7 +111,7 @@ def create_results_directory(filename: str,
     run_id = int(file_in.read())
     file_in.close()
 
-    new_run_folder_path = os.path.join(RESULTS_PATH,  f"{run_id}-{process_type.name.lower()}-{filename}")
+    new_run_folder_path = os.path.join(RESULTS_PATH, f"{run_id}-{process_type.name.lower()}-{filename}")
     if not os.path.isdir(new_run_folder_path):
         os.mkdir(new_run_folder_path)
 
@@ -142,3 +145,14 @@ def add_padding(character: Image.Image) -> Image.Image:
     padded_character.paste(character, (int(x_axis_offset), int(y_axis_offset)))
 
     return padded_character
+
+
+def get_first_quartile_of_areas_from_bboxes(bboxes: List,
+                                            image: np.ndarray) -> int:
+    areas = []
+    for bbox in bboxes:
+        areas.append((max(bbox[0][1], 0) + min(bbox[1][1], image.shape[0])) *
+                     (max(bbox[0][0], 0) + min(bbox[1][0], image.shape[1])))
+
+    areas.sort()
+    return np.quantile(areas, [0.25])[0] / 2
