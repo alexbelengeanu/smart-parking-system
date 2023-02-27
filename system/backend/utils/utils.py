@@ -105,15 +105,18 @@ def extract_segmentation_results(image, mask, resize_width=None, resize_height=2
     return figures
 
 
-def create_results_directory(filename: str,
-                             process_type: ProcessEnum):
+def create_results_directory(filename: str = None):
     file_in = open(RUN_ID_PATH, 'r')
     run_id = int(file_in.read())
     file_in.close()
-
-    new_run_folder_path = os.path.join(RESULTS_PATH, f"{run_id}-{process_type.name.lower()}-{filename}")
-    if not os.path.isdir(new_run_folder_path):
+    if filename:
+        new_run_folder_path = os.path.join(RESULTS_PATH, f"{run_id}-{ProcessEnum.ON_IMAGE.name.lower()}-{filename}")
         os.mkdir(new_run_folder_path)
+    else:
+        new_run_folder_path = os.path.join(RESULTS_PATH, f"{run_id}-{ProcessEnum.ON_VIDEO.name.lower()}")
+        os.mkdir(new_run_folder_path)
+        with open(os.path.join(new_run_folder_path, 'vehicle_id.txt'), 'w') as f:
+            f.write('0')
 
     file_out = open(RUN_ID_PATH, "w")
     file_out.write(str(run_id + 1))

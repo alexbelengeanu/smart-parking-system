@@ -1,3 +1,35 @@
+'''import cv2
+
+# initialize the camera
+# If you have multiple camera connected with
+# current device, assign a value in cam_port
+# variable according to that
+cam_port = 0
+cam = cv2.VideoCapture(cam_port)
+
+# reading the input using the camera
+result, image = cam.read()
+
+# If image will detected without any error,
+# show result
+if result:
+
+    # showing result, it take frame name and image
+    # output
+    cv2.imshow("GeeksForGeeks", image)
+
+    # saving image in local storage
+    #imwrite("GeeksForGeeks.png", image)
+
+    # If keyboard interrupt occurs, destroy image
+    # window
+    cv2.waitKey(0)
+    cv2.destroyWindow("GeeksForGeeks")
+
+# If captured image is corrupted, moving to else part
+else:
+    print("No image detected. Please! try again")'''
+
 from typing import List, Tuple
 import os
 import torch
@@ -6,7 +38,7 @@ import logging
 from PIL import Image
 from torchvision import transforms
 import numpy as np
-import argparse
+from datetime import datetime
 
 from system.detection.model import deeplab_v3
 from system.classification.model import CharacterClassifier
@@ -19,7 +51,7 @@ from system.backend.lib.serial_communication import initialize_serial_communicat
 from system.backend.lib.logger import Logger
 from system.backend.lib.types import ParkingSystemModelEnum, ProcessEnum
 from system.backend.lib.consts import SEGMENTATION_MODEL_PATH, CLASSIFICATION_MODEL_PATH, PROCESS_ON_IMAGES_PATH, \
-    CHARACTERS_MAPPING, ACCESS_ALLOWED_MESSAGE, ACCESS_DENIED_MESSAGE
+    CHARACTERS_MAPPING, ACCESS_ALLOWED_MESSAGE, ACCESS_DENIED_MESSAGE, CAMERA_PORT
 
 
 def license_plate_detection(input_sample: Image.Image,
@@ -62,6 +94,7 @@ def character_segmentation(cropped_license_plate: np.ndarray,
                      image_name="histogram_eq_image")
 
     all_contours, threshold = get_contours(image=histogram_eq_image,
+                                           pixel_threshold=100,
                                            log_images=True,
                                            logger=logger)
 
@@ -158,44 +191,48 @@ def license_plate_reconstruction_as_string(character_classification_results: Lis
 def main():
     torch.cuda.empty_cache()
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("filename", help="Filename of the image to process.")
-    args = parser.parse_args()
-
-    if os.path.isfile(os.path.join(PROCESS_ON_IMAGES_PATH, args.filename)):
-        results_folder_path = create_results_directory(process_type=ProcessEnum.ON_IMAGE,
-                                                       filename=args.filename)
-        logger = Logger(name='process_on_image', log_entry=results_folder_path , level=logging.DEBUG)
-        logger.debug(f"Successfully created results directory at: {logger.log_entry}")
-    else:
-        raise FileNotFoundError("File not found.")
-
-    logger.info("Starting process on single image input.")
+    results_folder_path = create_results_directory()
 
     serial_communication = initialize_serial_communication()
-    logger.debug("Initialized serial communication.")
-
     model_segmentation = initialize_model(ParkingSystemModelEnum.SEGMENTATION, SEGMENTATION_MODEL_PATH)
     model_classification = initialize_model(ParkingSystemModelEnum.CLASSIFICATION, CLASSIFICATION_MODEL_PATH)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.debug("Initialized both models and device.")
 
-    connector = get_connector(logger=logger)
-    logger.debug("Initialized connection to Azure Database.")
+    connector = get_connector()
+    camera = cv2.VideoCapture(CAMERA_PORT)
 
     while True:
         message_from_arduino = hear(serial_communication=serial_communication)  # listen to arduino
-        print(message_from_arduino)
+        print(str(datetime.now()) + message_from_arduino)
         if message_from_arduino.find("[arduino-sent] Object detected!") != -1:
+
+            # Create a separate folder for the new arrived vehicle
+            file_in = open(os.path.join(results_folder_path, "vehicle_id.txt"), 'r')
+            run_id = int(file_in.read())
+            file_in.close()
+
+            vehicle_folder_path = os.path.join(results_folder_path, str(run_id))
+            os.mkdir(vehicle_folder_path)
+
+            file_out = open(os.path.join(results_folder_path, "vehicle_id.txt"), "w")
+            file_out.write(str(run_id + 1))
+            file_out.close()
+
+            logger = Logger(name='process_on_livestream', log_entry=vehicle_folder_path , level=logging.DEBUG)
+            logger.debug(f"Successfully created results directory at: {logger.log_entry}")
+
+            result, frame = camera.read()
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_rgb = frame_rgb[100:420, 0:640]
+
             # Read input sample.
-            input_sample = Image.open(
-                os.path.join(PROCESS_ON_IMAGES_PATH, args.filename)).convert('RGB')
+            input_sample = Image.fromarray(frame_rgb)
             logger.log_image(image=input_sample,
                              image_name="original_image")
 
-            input_sample = input_sample.resize((640, 320))  # Resize to the model's input size.
+            """input_sample = input_sample.resize((640, 320))  # Resize to the model's input size.
             logger.log_image(image=input_sample,
-                             image_name="resized_image")
+                             image_name="resized_image")"""
 
             cropped_license_plate = license_plate_detection(input_sample=input_sample,
                                                             model=model_segmentation,
@@ -218,7 +255,7 @@ def main():
             was_found = check_plate_number(plate_number=license_plate_as_string,
                                            connector=connector)
 
-            with open(os.path.join(results_folder_path, "output.txt"), 'w') as f:
+            with open(os.path.join(vehicle_folder_path, "output.txt"), 'w') as f:
                 if was_found:
                     f.write(f'License plate {license_plate_as_string} was found in the database with allowed vehicles.')
                     tell(serial_communication=serial_communication,
@@ -229,7 +266,8 @@ def main():
                     tell(serial_communication=serial_communication,
                          message=ACCESS_DENIED_MESSAGE)
 
-            logger.info("Finished process on single image input.")
+            logger.info("Finished process on the vehicle.")
+            del logger
 
 
 if __name__ == "__main__":
