@@ -1,9 +1,6 @@
-import glob
 import os
-import cv2
-import numpy as np
 import torch
-from typing import Tuple, List, Callable, Optional, Union
+from typing import Tuple
 
 from torch import Tensor
 from PIL import Image
@@ -19,8 +16,17 @@ class SegmentationDataset(Dataset):
                  samples_folder: str,
                  labels_folder: str,
                  device: torch.device,
-                 transforms: List[str] = None,
                  training: bool = False):
+        """
+        Initialize the dataset.
+        Args:
+            samples_folder: Folder containing the samples.
+            labels_folder: Folder containing the labels.
+            device: The device to use for the tensors.
+            training: Is the dataset used for training?
+        Returns:
+            None
+        """
         self.device = device
         self.training = training
 
@@ -37,9 +43,13 @@ class SegmentationDataset(Dataset):
                label: Image.Image
                ) -> Tuple[Image.Image, Image.Image]:
         """
-        Rescale the given image to a fixed size.
+        Resize the given images to the same size.
+        Args:
+            source: The source image.
+            label: The label image.
 
-        :return:
+        Returns:
+            The resized images as a tuple.
         """
 
         source = source.resize((640, 320))
@@ -52,9 +62,11 @@ class SegmentationDataset(Dataset):
                   label: Image.Image) -> Tuple[Tensor, Tensor]:
         """
         Convert a PIL Image to PyTorch tensor. The result is a tensor with values between 0. and 1.
-        :param source: A source image / sample.
-        :param label: A label image consisting of a binary mask of the license plate
-        :return: The tuple with tensors equivalent to the images.
+        Args:
+            source: A source image / sample.
+            label: A label image consisting of a binary mask of the license plate
+        Returns:
+            The tuple with tensors equivalent to the images.
         """
         source = tf.to_tensor(source)
         label = tf.to_tensor(label)
@@ -64,8 +76,10 @@ class SegmentationDataset(Dataset):
                     index: int) -> Tuple[Tensor, Tensor]:
         """
         Return the image at the specified index.
-        :param index: An integer representing an index from the list of input data.
-        :return: The source and the label at the index, taken through transforms.
+        Args:
+            index: An integer representing an index from the list of input data.
+        Returns:
+            The source and the label at the index, taken through transforms.
         """
         source = Image.open(os.path.join(self.samples_path, self.samples[index])).convert('RGB')
         label = Image.open(os.path.join(self.labels_path, self.labels[index]))
@@ -85,6 +99,7 @@ class SegmentationDataset(Dataset):
     def __len__(self):
         """
         Get the total number of samples in the dataset.
-        :return: The length of the dataset.
+        Returns:
+            The length of the dataset.
         """
         return len(self.samples)

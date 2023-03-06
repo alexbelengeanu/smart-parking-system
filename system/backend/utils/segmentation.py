@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import List, Tuple
 
 import numpy as np
 import cv2
@@ -7,7 +7,7 @@ import torch
 from torchvision import transforms
 
 from system.detection.model import deeplab_v3
-from system.backend.utils.utils import image_resize, unsharp_mask, get_first_quartile_of_areas_from_bboxes
+from system.backend.utils.utils import image_resize, unsharp_mask
 from system.backend.lib.types import ThresholdEnum
 from system.backend.lib.logger import Logger
 
@@ -16,11 +16,11 @@ def preprocess_segmentation_map(segmentation_map, segmentation_threshold=70):
     """
     Function used to preprocess the segmentation map by applying a threshold value on the predict.
     Args:
-        segmentation_map: Predict to preprocess
-        segmentation_threshold: Segmentation threshold used to preprocess
+        segmentation_map: The output of the model which we will apply some preprocessing on.
+        segmentation_threshold: Threshold value used to binarize the segmentation map.
 
     Returns:
-        The preprocessed segmentation map (predict)
+        The preprocessed segmentation map (output of the model)
     """
     img = np.array(segmentation_map)
     img = cv2.GaussianBlur(img, (7, 7), 0)
@@ -32,6 +32,16 @@ def preprocess_segmentation_map(segmentation_map, segmentation_threshold=70):
 def get_segmentation_mask(input_sample: Image.Image,
                           model: deeplab_v3,
                           device: torch.device):
+    """
+    Function used to get the segmentation mask of the input image.
+    Args:
+        input_sample: The input image.
+        model: The model used to get the segmentation mask.
+        device: The device used to run the model.
+
+    Returns:
+        The segmentation mask of the input image.
+    """
     preprocess = transforms.Compose([
         transforms.ToTensor(),
     ])
@@ -51,7 +61,19 @@ def get_contours(image: np.ndarray,
                  threshold_type: ThresholdEnum = ThresholdEnum.BINARY,
                  log_images: bool = False,
                  logger: Logger = None) -> List:
+    """
+    Function used to get the contour of the license plate from the input image or of the characters inside the license
+    plate number.
+    Args:
+        image: The input image.
+        pixel_threshold: The threshold value used to binarize the image.
+        threshold_type: The type of threshold used to binarize the image.
+        log_images: Boolean value used to log the images or not.
+        logger: The logger used to log the images.
 
+    Returns:
+        A list with the contour of the license plate or of the characters inside the license plate number.
+    """
     kernel = np.ones((5, 5), np.uint8)
     img_dilation = cv2.dilate(image, kernel, iterations=1)
 
@@ -74,6 +96,15 @@ def get_contours(image: np.ndarray,
 
 def get_cropped_license_plate(input_sample: Image.Image,
                               license_plate_bbox: tuple):
+    """
+    Function used to crop the license plate from the input image.
+    Args:
+        input_sample: The input image.
+        license_plate_bbox: The bounding box of the license plate.
+
+    Returns:
+        The cropped license plate.
+    """
     cropped_plate_result = np.array(input_sample)
     cropped_plate_result = cropped_plate_result[max(license_plate_bbox[0][1], 0): min(license_plate_bbox[1][1],
                                                                                       cropped_plate_result.shape[0]),
@@ -88,7 +119,17 @@ def get_cropped_license_plate(input_sample: Image.Image,
 
 def filter_bboxes_noise(bboxes: list,
                         contours: list,
-                        image: np.ndarray):
+                        image: np.ndarray) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    """
+    Function used to filter the bounding boxes of the characters inside the license plate number which represent noise.
+    Args:
+        bboxes: The bounding boxes of all characters detected inside the license plate number.
+        contours: The contours of all characters detected inside the license plate number.
+        image: The input image.
+
+    Returns:
+        A list with the filtered bounding boxes of the characters inside the license plate number.
+    """
     filtered_bboxes = []
 
     for idx in bboxes:
@@ -105,20 +146,12 @@ def filter_bboxes_noise(bboxes: list,
         if counts[0] > 2000 and counts[1] > (counts[0] / 2) and len(counts) > 1:
             filtered_bboxes.append(bbox)
 
-    """area_threshold = get_first_quartile_of_areas_from_bboxes(filtered_bboxes, image)
-
-    for bbox in filtered_bboxes:
-        bbox_area = (max(bbox[0][1], 0) + min(bbox[1][1], image.shape[0])) * \
-                    (max(bbox[0][0], 0) + min(bbox[1][0], image.shape[1]))
-        if bbox_area < area_threshold:
-            filtered_bboxes.remove(bbox)"""
-
     return filtered_bboxes
 
 
 def merge_images(images: List) -> Image:
     """
-
+    Function used to merge a list of images into a single one, on the same row.
     Args:
         images: A list of images to be merged into a single one.
 

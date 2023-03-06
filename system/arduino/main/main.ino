@@ -11,8 +11,8 @@ IRsend irsend;
 Servo servo;  // Create object for Servo motor
 
 int position = 80;
-String message;
 bool detected = false;
+String message;
 
 void setup() {
   // put your setup code here, to run once:
@@ -32,7 +32,8 @@ void setup() {
   irsend.enableIROut(38);
   irsend.mark(0);
 
-  servo.attach(3, 500, 2430);   // Set PWM pin 3 for Servo motor 1
+  //servo.attach(3, 500, 2430);   // Set PWM pin 3 for Servo motor 1
+  servo.attach(3);
   servo.write(position);
 
   Serial.begin(9600);// initialize serial communication @ 9600 baud:
@@ -41,10 +42,10 @@ void setup() {
 
 void open_gate(){
   // Rotating Servo motor in clockwise from 0 degree to 90 degree
-  for (position = 80; position < 220; position+=10) 
+  for (position = 80; position < 220; position+=2) 
   { 
     servo.write(position);  // Set position of Servo motor 
-    delay(500);               // Short delay to control the speed      
+    delay(100);               // Short delay to control the speed      
   }
   delay(3000);
 }
@@ -52,10 +53,10 @@ void open_gate(){
 void close_gate(){
   // Rotating Servo motor in clockwise from 0 degree to 90 degree
   delay(3000);
-  for (position = 220; position > 80; position-=10) 
+  for (position = 220; position > 80; position-=2) 
   { 
     servo.write(position);  // Set position of Servo motor 
-    delay(500);               // Short delay to control the speed      
+    delay(100);               // Short delay to control the speed      
   }
 }
 
@@ -64,14 +65,11 @@ void loop() {
   if (digitalRead(PIN_DETECT) == 1 )
     {
       if (detected == false) {
-        //digitalWrite(LED_BUILTIN, HIGH); // Led ON
-        Serial.println("[arduino-sent] Object detected!");
         detected = true;
         digitalWrite(PIN_ALBASTRU, HIGH); // Led OFF
+        delay(1000);
+        Serial.println("[arduino-sent] Object detected!");
       }
-
-      // if(position!=220)
-      //   open_gate();
       if(Serial.available()){
         message = String(Serial.readString());
         message.trim();
@@ -88,7 +86,7 @@ void loop() {
         }
       }
     }
-    else
+  else
     {
       //digitalWrite(LED_BUILTIN, LOW); // Led OFF
       if (detected == true){

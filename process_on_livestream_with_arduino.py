@@ -1,35 +1,3 @@
-'''import cv2
-
-# initialize the camera
-# If you have multiple camera connected with
-# current device, assign a value in cam_port
-# variable according to that
-cam_port = 0
-cam = cv2.VideoCapture(cam_port)
-
-# reading the input using the camera
-result, image = cam.read()
-
-# If image will detected without any error,
-# show result
-if result:
-
-    # showing result, it take frame name and image
-    # output
-    cv2.imshow("GeeksForGeeks", image)
-
-    # saving image in local storage
-    #imwrite("GeeksForGeeks.png", image)
-
-    # If keyboard interrupt occurs, destroy image
-    # window
-    cv2.waitKey(0)
-    cv2.destroyWindow("GeeksForGeeks")
-
-# If captured image is corrupted, moving to else part
-else:
-    print("No image detected. Please! try again")'''
-
 from typing import List, Tuple
 import os
 import torch
@@ -49,8 +17,8 @@ from system.backend.utils.models import initialize_model
 from system.backend.lib.cloud import get_connector, check_plate_number
 from system.backend.lib.serial_communication import initialize_serial_communication, tell, hear
 from system.backend.lib.logger import Logger
-from system.backend.lib.types import ParkingSystemModelEnum, ProcessEnum
-from system.backend.lib.consts import SEGMENTATION_MODEL_PATH, CLASSIFICATION_MODEL_PATH, PROCESS_ON_IMAGES_PATH, \
+from system.backend.lib.types import ParkingSystemModelEnum
+from system.backend.lib.consts import SEGMENTATION_MODEL_PATH, CLASSIFICATION_MODEL_PATH, \
     CHARACTERS_MAPPING, ACCESS_ALLOWED_MESSAGE, ACCESS_DENIED_MESSAGE, CAMERA_PORT
 
 
@@ -58,6 +26,17 @@ def license_plate_detection(input_sample: Image.Image,
                             model: deeplab_v3,
                             device: torch.device,
                             logger: Logger) -> np.ndarray:
+    """
+    Function that performs license plate detection on a given input sample.
+    Args:
+        input_sample: The input sample to perform license plate detection on.
+        model: Model to use for license plate detection.
+        device: The device to use for license plate detection.
+        logger: Logger object to use for logging.
+
+    Returns:
+        The cropped license plate from the input sample.
+    """
 
     # Get license plate segmentation mask
     output = get_segmentation_mask(input_sample=input_sample,
@@ -87,14 +66,23 @@ def license_plate_detection(input_sample: Image.Image,
 
 
 def character_segmentation(cropped_license_plate: np.ndarray,
-                           logger: Logger):
+                           logger: Logger) -> [List[Tuple[Tuple[int, int], Tuple[int, int]]], np.ndarray]:
+    """
+    Function that performs character segmentation on a given cropped license plate.
+    Args:
+        cropped_license_plate: The cropped license plate to perform character segmentation on.
+        logger: Logger object to use for logging.
+
+    Returns:
+        The bounding boxes of the characters in the cropped license plate and the cropped license plate without noise.
+    """
 
     histogram_eq_image = histogram_equalization(cropped_license_plate)
     logger.log_image(image=histogram_eq_image,
                      image_name="histogram_eq_image")
 
     all_contours, threshold = get_contours(image=histogram_eq_image,
-                                           pixel_threshold=100,
+                                           pixel_threshold=75,
                                            log_images=True,
                                            logger=logger)
 
@@ -153,10 +141,14 @@ def character_classification(model: CharacterClassifier,
                              logger: Logger) -> List[torch.Tensor]:
     """
     Classify the cropped characters in the license plate using the trained model.
-    :param model: The trained model.
-    :param filtered_character_bboxes: The bounding boxes of the characters in the license plate.
-    :param cropped_plate_without_noise: The cropped license plate without noise.
-    :return: The predicted characters.
+    Args:
+        model: The trained model.
+        filtered_character_bboxes: The bounding boxes of the characters in the license plate.
+        cropped_plate_without_noise: The cropped license plate without noise.
+        logger: Logger object to use for logging.
+
+    Returns:
+        The predicted characters.
     """
 
     license_plate_predicts_list = []
@@ -181,6 +173,14 @@ def character_classification(model: CharacterClassifier,
 
 
 def license_plate_reconstruction_as_string(character_classification_results: List[torch.Tensor]) -> str:
+    """
+    Reconstruct the license plate as a string from the predicted characters.
+    Args:
+        character_classification_results: The results of the classification model.
+
+    Returns:
+        The license plate as a string.
+    """
     license_plate_as_string = ""
     for character in character_classification_results:
         license_plate_as_string += (CHARACTERS_MAPPING[str(int(character[0]))])
@@ -189,6 +189,11 @@ def license_plate_reconstruction_as_string(character_classification_results: Lis
 
 
 def main():
+    """
+    Main function of the license plate recognition system.
+    Returns:
+        None
+    """
     torch.cuda.empty_cache()
 
     results_folder_path = create_results_directory()
@@ -229,10 +234,6 @@ def main():
             input_sample = Image.fromarray(frame_rgb)
             logger.log_image(image=input_sample,
                              image_name="original_image")
-
-            """input_sample = input_sample.resize((640, 320))  # Resize to the model's input size.
-            logger.log_image(image=input_sample,
-                             image_name="resized_image")"""
 
             cropped_license_plate = license_plate_detection(input_sample=input_sample,
                                                             model=model_segmentation,

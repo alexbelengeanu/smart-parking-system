@@ -51,6 +51,7 @@ AZURE_CONFIG = {
     'database': "thesis"
 }
 
+# ARDUINO
 ARDUINO_PORT = "COM3"
 ARDUINO_BAUDRATE = 9600
 CAMERA_PORT = 0

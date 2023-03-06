@@ -2,9 +2,6 @@ import gc
 import os
 from typing import Optional
 
-import time
-import matplotlib.pyplot as plt
-import numpy as np
 from decimal import Decimal
 from hydra.utils import get_original_cwd
 
@@ -17,8 +14,6 @@ import torchvision
 from torch.utils.data import random_split
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from torchvision.datasets import KMNIST
-from torch.optim import Adam
 
 from system.classification.model import CharacterClassifier
 from system.backend.lib.logger import Logger
@@ -27,7 +22,8 @@ from system.backend.lib.logger import Logger
 def tear_down() -> None:
     """
     Close the experiment.
-    :return: None
+    Returns:
+         None
     """
     gc.collect()
     torch.cuda.empty_cache()
@@ -39,9 +35,12 @@ class Trainer:
                  logger: Logger,
                  experiment: mlflow.entities.Experiment) -> None:
         """
-            Initialize the trainer object.
+        Initialize the trainer object.
 
-            :param config: The hydra config file
+        Args:
+            config: The configuration dictionary.
+            logger: The logger object.
+            experiment: The mlflow experiment object.
         """
         gc.collect()
         torch.cuda.empty_cache()
@@ -75,8 +74,9 @@ class Trainer:
 
     def make_dirs(self) -> None:
         """
-            Set up the local directories needed for storing various experiment results.
-            :return: None
+        Set up the local directories needed for storing various experiment results.
+        Returns:
+            None
         """
         working_dir = get_original_cwd()
 
@@ -111,7 +111,8 @@ class Trainer:
     def make_datasets(self) -> None:
         """
         Create and store the dataset and dataloader objects for the splits of our data.
-        :return: None.
+        Returns:
+             None.
         """
         batch_size = self.config['batch_size']
 
@@ -135,7 +136,8 @@ class Trainer:
     def make_model(self) -> None:
         """
         Instantiate and store the model for the experiment.
-        :return: None.
+        Returns:
+             None.
         """
 
         self.model = CharacterClassifier().to(self.device)
@@ -143,14 +145,16 @@ class Trainer:
     def set_optimizer(self) -> None:
         """
         Instantiate and stores the optimizer of the experiment.
-        :return: None.
+        Returns:
+             None.
         """
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['lr'])
 
     def set_loss_function(self) -> None:
         """
         Select and instantiate the loss function based on the hyperparameter.
-        :return: None.
+        Returns:
+             None.
         """
         loss_function = self.config['loss_function']
         if loss_function == "ce":
@@ -161,7 +165,8 @@ class Trainer:
     def setup(self) -> None:
         """
         Wrap the setup of the experiment.
-        :return: None
+        Returns:
+             None.
         """
         self.make_dirs()
         self.make_datasets()
@@ -172,6 +177,11 @@ class Trainer:
         self.n_epochs = self.config['epochs']
 
     def train(self) -> None:
+        """
+        Function used to train the model.
+        Returns:
+            None.
+        """
         accs = []
         losses = []
         val_accs = []
@@ -262,14 +272,16 @@ class Trainer:
     def generate_report(self) -> None:
         """
         Generate a report after the experiment has finished.
-        :return: None.
+        Returns:
+             None.
         """
         pass
 
     def run_experiment(self) -> None:
         """
         Wraps all the steps of the experiment.
-        :return: None.
+        Returns:
+             None.
         """
         self.setup()
         # Start MLflow

@@ -6,6 +6,14 @@ from system.backend.lib.consts import AZURE_CONFIG
 
 
 def get_connector(logger: Logger = None) -> mysql.connector:
+    """
+    Function used to get a connection to the database.
+    Args:
+        logger: Logger used to log the connection status.
+
+    Returns:
+        The connector to the database.
+    """
     try:
         conn = mysql.connector.connect(**AZURE_CONFIG)
         if logger:
@@ -26,6 +34,15 @@ def get_connector(logger: Logger = None) -> mysql.connector:
 
 def check_plate_number(plate_number: str,
                        connector: mysql.connector) -> bool:
+    """
+    Function used to check if a plate number is allowed to enter the parking lot, after searching it in the database.
+    Args:
+        plate_number: Plate number to check.
+        connector: Connector to the database.
+
+    Returns:
+        True if the plate number is found in the database, False otherwise.
+    """
 
     query = f"SELECT * FROM AllowedVehicles WHERE PlateNumber = '{plate_number}'"
     cursor = connector.cursor()

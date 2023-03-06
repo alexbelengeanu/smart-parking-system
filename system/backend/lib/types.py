@@ -13,6 +13,7 @@ class ProcessEnum(Enum):
     ON_IMAGE = 1
     ON_VIDEO = 2
 
+
 class ThresholdEnum(Enum):
     """An enumeration of all the possible threshold types."""
     BINARY = 1

@@ -7,16 +7,15 @@ from system.classification.model import CharacterClassifier
 from system.backend.lib.types import ParkingSystemModelEnum
 from system.backend.lib.consts import SEGMENTATION_MODEL_PATH, CLASSIFICATION_MODEL_PATH
 
-def initialize_model(model_type : ParkingSystemModelEnum,
-                     weights_path : str) -> Union[deeplab_v3, CharacterClassifier]:
+
+def initialize_model(model_type : ParkingSystemModelEnum) -> Union[deeplab_v3, CharacterClassifier]:
     """
     Initialize the model based on model type.
     Parameters:
         model_type : The type of the model.
-        weights_path : The path to the model's weights.
 
     Returns:
-        model : The model itself with weights loaded.
+        model : The model itself with the weights loaded.
     """
     if model_type == ParkingSystemModelEnum.SEGMENTATION:
         model = deeplab_v3('resnet101', 'imagenet', ['license-plate'], 'sigmoid')

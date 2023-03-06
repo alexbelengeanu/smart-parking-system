@@ -12,9 +12,13 @@ def deeplab_v3(encoder: str,
     """
     Initialize model for training.
     Args:
+        encoder: Encoder name.
+        weights: Encoder weights.
+        classes: List of classes in the dataset.
+        activation: Activation function used.
 
     Returns:
-        model: Returns the model.
+        Model for training or inference.
     """
     model = smp.DeepLabV3(
         encoder_name=encoder,

@@ -25,7 +25,8 @@ from system.backend.lib.logger import Logger
 def tear_down() -> None:
     """
     Close the experiment.
-    :return: None
+    Returns:
+        None
     """
     gc.collect()
     torch.cuda.empty_cache()
@@ -38,7 +39,12 @@ class Trainer:
                  experiment: mlflow.entities.Experiment) -> None:
         """
         Initialize the trainer object.
-        :param config: The hydra config file
+        Args:
+            config: The configuration dictionary.
+            logger: The logger object.
+            experiment: The mlflow experiment object.
+        Returns:
+            None
         """
         gc.collect()
         torch.cuda.empty_cache()
@@ -75,7 +81,8 @@ class Trainer:
     def make_dirs(self) -> None:
         """
         Set up the local directories needed for storing various experiment results.
-        :return: None
+        Returns:
+            None
         """
         working_dir = get_original_cwd()
 
@@ -110,7 +117,8 @@ class Trainer:
     def make_datasets(self) -> None:
         """
         Create and store the dataset and dataloader objects for the splits of our data.
-        :return: None.
+        Returns:
+            None
         """
         batch_size = self.config['batch_size']
         transforms = self.config['augmentation']
@@ -165,7 +173,8 @@ class Trainer:
     def make_model(self) -> None:
         """
         Instantiate and store the model for the experiment.
-        :return: None.
+        Returns:
+            None
         """
 
         self.model = deeplab_v3('resnet101', 'imagenet', ['license-plate'], 'sigmoid')
@@ -173,7 +182,8 @@ class Trainer:
     def set_optimizer(self) -> None:
         """
         Instantiate and stores the optimizer of the experiment.
-        :return: None.
+        Returns:
+            None
         """
         self.optimizer = optim.SGD(self.model.parameters(),
                                    lr=self.config['lr'],
@@ -183,7 +193,8 @@ class Trainer:
     def set_loss_function(self) -> None:
         """
         Select and instantiate the loss function based on the hyperparameter.
-        :return: None.
+        Returns:
+            None
         """
         loss_function = self.config['loss_function']
         if loss_function == "bce":
@@ -194,7 +205,8 @@ class Trainer:
     def setup(self) -> None:
         """
         Wrap the setup of the experiment.
-        :return: None
+        Returns:
+            None
         """
         self.make_dirs()
         self.make_datasets()
@@ -205,6 +217,11 @@ class Trainer:
         self.n_epochs = self.config['epochs']
 
     def train(self) -> None:
+        """
+        Function used to train the model.
+        Returns:
+            None
+        """
         # Initialize SMP Train Epoch object
         train_epoch = TrainEpoch(
             self.model,
@@ -266,6 +283,11 @@ class Trainer:
                                             f'v{self.version}_e{self.best_epoch}_l{self.best_valid_loss:.3f}.pt'))
 
     def test(self) -> None:
+        """
+        Function used to test the model.
+        Returns:
+            None
+        """
         self.logger.debug(f"Running model on test dataset.")
         test_epoch = ValidEpoch(
             self.model,
@@ -313,14 +335,16 @@ class Trainer:
     def generate_report(self) -> None:
         """
         Generate a report after the experiment has finished.
-        :return: None.
+        Returns:
+            None
         """
         pass
 
     def run_experiment(self) -> None:
         """
         Wraps all the steps of the experiment.
-        :return: None.
+        Returns:
+            None
         """
         self.setup()
         # Start MLflow

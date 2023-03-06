@@ -9,11 +9,13 @@ from system.backend.lib.types import ProcessEnum
 from system.backend.lib.consts import RUN_ID_PATH, RESULTS_PATH, RAW_MAX_SIZE
 
 
-def histogram_equalization(image: np.ndarray):
+def histogram_equalization(image: np.ndarray) -> np.ndarray:
     """
     Apply histogram equalization to a given image.
-    :param image: An image.
-    :return: The image after the histogram equalization as numpy array.
+    Args:
+        image: The image to apply histogram equalization to.
+    Returns:
+        The image after applying histogram equalization.
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     equalized = cv2.equalizeHist(gray)
@@ -21,8 +23,21 @@ def histogram_equalization(image: np.ndarray):
     return equalized
 
 
-def unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.0, threshold=0):
-    # https://stackoverflow.com/questions/4993082/how-to-sharpen-an-image-in-opencv
+def unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.0, threshold=0) -> np.ndarray:
+    """
+    Return a sharpened version of the image, using an unsharp mask.
+    https://stackoverflow.com/questions/4993082/how-to-sharpen-an-image-in-opencv
+    Args:
+        image: The image to sharpen.
+        kernel_size: The size of the blur kernel, should be an odd number.
+        sigma: The standard deviation of the blur kernel.
+        amount: The strength of the sharpening.
+        threshold: The minimum difference between the original and the blur
+            image that is required for the pixel to be included in the sharpened
+            output.
+    Returns:
+        The sharpened image.
+    """
     blurred = cv2.GaussianBlur(image, kernel_size, sigma)
     sharpened = float(amount + 1) * image - float(amount) * blurred
     sharpened = np.maximum(sharpened, np.zeros(sharpened.shape))
@@ -34,8 +49,19 @@ def unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.0, threshold=0):
     return sharpened
 
 
-def image_resize(image, width=None, height=None, inter=cv2.INTER_CUBIC):
-    # https://stackoverflow.com/questions/44650888/resize-an-image-without-distortion-opencv
+def image_resize(image, width=None, height=None, inter=cv2.INTER_CUBIC) -> np.ndarray:
+    """
+    Resize an image to a given width and height.
+    https://stackoverflow.com/questions/44650888/resize-an-image-without-distortion-opencv
+    Args:
+        image: The image to sharpen.
+        width: Width of the new image
+        height: Height of the new image
+        inter: Interpolation method
+
+    Returns:
+        The resized image.
+    """
     dim = None
     (h, w) = image.shape[:2]
 
@@ -55,7 +81,20 @@ def image_resize(image, width=None, height=None, inter=cv2.INTER_CUBIC):
 
 
 def extract_segmentation_results(image, mask, resize_width=None, resize_height=256, sharpen_amount=10,
-                                 crop_min_area_rect=False):
+                                 crop_min_area_rect=False) -> List[np.ndarray]:
+    """
+    Extract the figures from the image using the segmentation mask.
+    Args:
+        image: The image to extract the figures from.
+        mask: The segmentation mask.
+        resize_width: The width of the result cropped figures.
+        resize_height: The height of the result cropped figures.
+        sharpen_amount: The amount of sharpening to apply to the result cropped figures.
+        crop_min_area_rect: Crop the figures using the minimum area rectangle.
+
+    Returns:
+
+    """
     image = cv2.cvtColor(np.array(image, copy=True), cv2.COLOR_RGB2BGR)
     contours, hierarchy = cv2.findContours(
         mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -105,7 +144,15 @@ def extract_segmentation_results(image, mask, resize_width=None, resize_height=2
     return figures
 
 
-def create_results_directory(filename: str = None):
+def create_results_directory(filename: str = None) -> str:
+    """
+    Create a new directory for the results of the current run.
+    Args:
+        filename: Input filename for the current run.
+
+    Returns:
+        The path of the new directory.
+    """
     file_in = open(RUN_ID_PATH, 'r')
     run_id = int(file_in.read())
     file_in.close()
@@ -128,6 +175,16 @@ def create_results_directory(filename: str = None):
 def draw_bboxes(bboxes: list,
                 contours: list,
                 image: np.ndarray) -> np.ndarray:
+    """
+    Draw bounding boxes on the image.
+    Args:
+        bboxes: Bounding boxes to draw.
+        contours: Contours of the characters on which we will draw the bounding boxes.
+        image: The image on which we will draw the bounding boxes.
+
+    Returns:
+        The image with the bounding boxes on it.
+    """
     for idx in bboxes:
         x, y = contours[idx].T
         bbox = ((np.min(x), np.min(y)), (np.max(x), np.max(y)))
@@ -137,6 +194,14 @@ def draw_bboxes(bboxes: list,
 
 
 def add_padding(character: Image.Image) -> Image.Image:
+    """
+    Add padding to the character image.
+    Args:
+        character: Image with the character.
+
+    Returns:
+        Image with the character and padding added.
+    """
     width, height = character.size
     x_axis_offset = (RAW_MAX_SIZE[0] - width) / 2
     y_axis_offset = (RAW_MAX_SIZE[1] - height) / 2
@@ -148,14 +213,3 @@ def add_padding(character: Image.Image) -> Image.Image:
     padded_character.paste(character, (int(x_axis_offset), int(y_axis_offset)))
 
     return padded_character
-
-
-def get_first_quartile_of_areas_from_bboxes(bboxes: List,
-                                            image: np.ndarray) -> int:
-    areas = []
-    for bbox in bboxes:
-        areas.append((max(bbox[0][1], 0) + min(bbox[1][1], image.shape[0])) *
-                     (max(bbox[0][0], 0) + min(bbox[1][0], image.shape[1])))
-
-    areas.sort()
-    return np.quantile(areas, [0.25])[0] / 2
