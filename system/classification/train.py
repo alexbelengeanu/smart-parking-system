@@ -7,7 +7,7 @@ from hydra.utils import get_original_cwd
 
 import mlflow
 from omegaconf import DictConfig
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score
 
 import torch
 import torchvision
@@ -16,7 +16,6 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 from system.classification.model import CharacterClassifier
-from system.backend.lib.logger import Logger
 
 
 def tear_down() -> None:
@@ -32,25 +31,20 @@ def tear_down() -> None:
 class Trainer:
     def __init__(self,
                  config: DictConfig,
-                 logger: Logger,
                  experiment: mlflow.entities.Experiment) -> None:
         """
         Initialize the trainer object.
 
         Args:
             config: The configuration dictionary.
-            logger: The logger object.
             experiment: The mlflow experiment object.
         """
         gc.collect()
         torch.cuda.empty_cache()
 
         self.config = config
-        self.logger = logger
         self.experiment = experiment
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.logger.debug(f"Running training using device : {self.device}")
 
         self.train_dataset: Optional[Dataset] = None
         self.train_dataloader: Optional[DataLoader] = None
@@ -106,8 +100,6 @@ class Trainer:
         file_out.write(str(_version))
         file_out.close()
 
-        self.logger.debug("Successfully created checkpoint directory for the experiment.")
-
     def make_datasets(self) -> None:
         """
         Create and store the dataset and dataloader objects for the splits of our data.
@@ -117,13 +109,13 @@ class Trainer:
         batch_size = self.config['batch_size']
 
         transform = transforms.Compose([
-            transforms.Grayscale(),
-            transforms.ToTensor()
+            transforms.Grayscale(num_output_channels=1),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
         ])
         dataset = torchvision.datasets.ImageFolder(r'E:/GitHub/smart-parking-system/dataset/classification-small/',
                                                    transform=transform)
         self.num_classes = len(dataset.classes)
-        self.logger.debug(f"Successfully loaded dataset with {self.num_classes} classes")
 
         # Train and test dataset and dataloaders
         train_length = int(.8 * len(dataset))
@@ -148,7 +140,12 @@ class Trainer:
         Returns:
              None.
         """
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['lr'])
+        self.optimizer = torch.optim.SGD(self.model.parameters(),
+                                         lr=self.config['lr'],
+                                         momentum=self.config['momentum'],
+                                         weight_decay=self.config['weight_decay'])
+
+        # torch.optim.Adam(self.model.parameters(), lr=self.config['lr'])
 
     def set_loss_function(self) -> None:
         """
@@ -160,7 +157,7 @@ class Trainer:
         if loss_function == "ce":
             self.criterion = torch.nn.CrossEntropyLoss()
         else:
-            self.logger.debug(f"Invalid loss function: {loss_function}.")
+            print(f"Invalid loss function: {loss_function}.")
 
     def setup(self) -> None:
         """
@@ -182,44 +179,46 @@ class Trainer:
         Returns:
             None.
         """
-        accs = []
+        f1s = []
         losses = []
-        val_accs = []
+        val_f1s = []
         val_losses = []
         for epoch in (range(self.n_epochs)):
-            self.logger.debug(f"Epoch {epoch} | Training")
+            print(f"Epoch {epoch} | Training")
             self.model.train()
             # Get batches
             loss = 0.
-            acc = 0.
+            f1 = 0.
             num_batches = 0
             for X_batch, y_batch in self.train_dataloader:
                 num_batches += 1
                 X_batch = X_batch.cuda()
                 y_batch = y_batch.cuda()
+                self.optimizer.zero_grad()
                 y_pred = self.model(X_batch)
 
                 loss_batch = self.criterion(y_pred, y_batch)
                 loss += loss_batch.item()
-                acc += accuracy_score(torch.argmax(y_pred.cpu(), axis=1), y_batch.cpu())
+                f1 += f1_score(y_batch.cpu(), torch.argmax(y_pred.cpu(), axis=1), average="macro")
 
-                self.optimizer.zero_grad()
                 loss_batch.backward()
                 self.optimizer.step()
 
-            acc /= num_batches
+            f1 /= num_batches
             loss /= num_batches
             losses.append(loss)
-            accs.append(acc)
+            f1s.append(f1)
 
-            # Log Accuracy and loss per epoch in MLflow
-            mlflow.log_metric("Train Accuracy", acc)
+            # Log F1 Score and loss per epoch in MLflow
+            mlflow.log_metric("Train F1 Score", f1)
             mlflow.log_metric("Train Loss", loss)
+
+            print(f"Epoch {epoch} | Train F1 Score: {f1:.3f} | Train Loss: {loss:.3f}")
 
             # Validation set
             self.model.eval()
             num_batches = 0
-            val_acc = 0.
+            val_f1 = 0.
             val_loss = 0.
             for X_batch, y_batch in self.test_dataloader:
                 num_batches += 1
@@ -227,24 +226,26 @@ class Trainer:
                 y_batch = y_batch.cuda()
 
                 y_pred = self.model(X_batch)
-                val_acc += accuracy_score(torch.argmax(y_pred.cpu(), axis=1), y_batch.cpu())
+                val_f1 += f1_score(y_batch.cpu(), torch.argmax(y_pred.cpu(), axis=1), average="macro")
                 loss_batch = self.criterion(y_pred, y_batch)
                 val_loss += loss_batch.item()
 
-            val_acc /= num_batches
+            val_f1 /= num_batches
             val_loss /= num_batches
             val_losses.append(val_loss)
-            val_accs.append(val_acc)
+            val_f1s.append(val_f1)
 
-            mlflow.log_metric("Validation Accuracy", val_acc)
+            mlflow.log_metric("Validation F1 Score", val_f1)
             mlflow.log_metric("Validation Loss", val_loss)
 
-            if val_loss > 0.4:
-                self.logger.debug(
+            print(f"Epoch {epoch} | Validation F1 Score: {val_f1:.3f} | Validation Loss: {val_loss:.3f}")
+
+            if self.best_valid_loss > val_loss > 0.4:
+                print(
                     f"Found model with better validation loss than previous: {val_loss:.3f} < "
                     f"{self.best_valid_loss:.3f}, but bigger loss than 0.4.")
                 if val_loss < self.best_valid_loss - 0.2:
-                    self.logger.debug(
+                    print(
                         f"There is a major difference between the previous model loss and the current loss (> .2). "
                         f"Saving current model weights.")
                     self.best_valid_loss = val_loss
@@ -255,9 +256,9 @@ class Trainer:
                     torch.save(self.model.state_dict(),
                                os.path.join(self.model_checkpoints_path,
                                             f'v{self.version}_e{self.best_epoch}_l{self.best_valid_loss:.3f}.pt'))
-            else:
+            elif val_loss < 0.4:
                 if val_loss < self.best_valid_loss:
-                    self.logger.debug(
+                    print(
                         f"Found model with better validation loss than previous: {val_loss:.3f} < "
                         f"{self.best_valid_loss:.3f}, and smaller loss than 0.4. Saving current model weights anyway.")
                     self.best_valid_loss = val_loss
@@ -290,8 +291,8 @@ class Trainer:
             # Retrieve run id
             self.run_id = run.info.run_id
             mlflow.set_tracking_uri("http://127.0.0.1:5000")
-            self.logger.debug(f'Started running {RUN_NAME} with ID: {self.run_id}')
-            self.logger.debug(f'Artifact URI : {mlflow.get_artifact_uri()}')
+            print(f'Started running {RUN_NAME} with ID: {self.run_id}')
+            print(f'Artifact URI : {mlflow.get_artifact_uri()}')
             mlflow.log_params(self.config)
 
             self.train()
