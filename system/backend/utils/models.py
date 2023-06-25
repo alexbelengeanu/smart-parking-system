@@ -8,7 +8,7 @@ from system.backend.lib.types import ParkingSystemModelEnum
 from system.backend.lib.consts import SEGMENTATION_MODEL_PATH, CLASSIFICATION_MODEL_PATH
 
 
-def initialize_model(model_type : ParkingSystemModelEnum) -> Union[deeplab_v3, CharacterClassifier]:
+def initialize_model(model_type: ParkingSystemModelEnum) -> Union[deeplab_v3, CharacterClassifier]:
     """
     Initialize the model based on model type.
     Parameters:

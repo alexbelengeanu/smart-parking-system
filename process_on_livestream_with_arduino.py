@@ -199,8 +199,8 @@ def main():
     results_folder_path = create_results_directory()
 
     serial_communication = initialize_serial_communication()
-    model_segmentation = initialize_model(ParkingSystemModelEnum.SEGMENTATION, SEGMENTATION_MODEL_PATH)
-    model_classification = initialize_model(ParkingSystemModelEnum.CLASSIFICATION, CLASSIFICATION_MODEL_PATH)
+    model_segmentation = initialize_model(ParkingSystemModelEnum.SEGMENTATION)
+    model_classification = initialize_model(ParkingSystemModelEnum.CLASSIFICATION)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     connector = get_connector()
